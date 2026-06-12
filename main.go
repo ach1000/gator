@@ -97,6 +97,19 @@ func handlerRegister(s *state, cmd command) error {
 	return nil
 }
 
+func handlerReset(s *state, cmd command) error {
+	if len(cmd.args) != 0 {
+		return errors.New("reset does not take any arguments")
+	}
+
+	if err := s.db.DeleteAllUsers(context.Background()); err != nil {
+		return fmt.Errorf("failed to reset database: %w", err)
+	}
+
+	fmt.Println("Database reset: all users deleted")
+	return nil
+}
+
 func main() {
 	cfg, err := config.Read()
 	if err != nil {
@@ -124,6 +137,7 @@ func main() {
 	cmds := &commands{handlers: map[string]func(*state, command) error{}}
 	cmds.register("login", handlerLogin)
 	cmds.register("register", handlerRegister)
+	cmds.register("reset", handlerReset)
 
 	cmd := command{
 		name: os.Args[1],
