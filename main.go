@@ -1,14 +1,21 @@
 package main
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/ach1000/gator/internal/config"
+	"github.com/ach1000/gator/internal/database"
+	"github.com/google/uuid"
+	_ "github.com/lib/pq"
 )
 
 type state struct {
+	db     *database.Queries
 	config *config.Config
 }
 
@@ -40,11 +47,53 @@ func handlerLogin(s *state, cmd command) error {
 	}
 
 	username := cmd.args[0]
+	_, err := s.db.GetUser(context.Background(), username)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("user %q does not exist", username)
+		}
+		return err
+	}
+
 	if err := s.config.SetUser(username); err != nil {
 		return err
 	}
 
 	fmt.Printf("User set to %s\n", username)
+	return nil
+}
+
+func handlerRegister(s *state, cmd command) error {
+	if len(cmd.args) == 0 {
+		return errors.New("name is required")
+	}
+
+	name := cmd.args[0]
+	_, err := s.db.GetUser(context.Background(), name)
+	if err == nil {
+		return errors.New("user already exists")
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	now := time.Now().UTC()
+	user, err := s.db.CreateUser(context.Background(), database.CreateUserParams{
+		ID:        uuid.New(),
+		CreatedAt: now,
+		UpdatedAt: now,
+		Name:      name,
+	})
+	if err != nil {
+		return err
+	}
+
+	if err := s.config.SetUser(name); err != nil {
+		return err
+	}
+
+	fmt.Printf("User created: %s\n", name)
+	fmt.Printf("%+v\n", user)
 	return nil
 }
 
@@ -55,14 +104,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	s := &state{config: &cfg}
-	cmds := &commands{handlers: map[string]func(*state, command) error{}}
-	cmds.register("login", handlerLogin)
-
 	if len(os.Args) < 2 {
 		fmt.Println("not enough arguments provided")
 		os.Exit(1)
 	}
+
+	db, err := sql.Open("postgres", cfg.DBURL)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	if err := db.Ping(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+
+	s := &state{db: database.New(db), config: &cfg}
+	cmds := &commands{handlers: map[string]func(*state, command) error{}}
+	cmds.register("login", handlerLogin)
+	cmds.register("register", handlerRegister)
 
 	cmd := command{
 		name: os.Args[1],
