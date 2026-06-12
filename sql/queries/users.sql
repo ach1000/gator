@@ -13,5 +13,10 @@ SELECT id, created_at, updated_at, name
 FROM users
 WHERE name = $1;
 
+-- name: GetUsers :many
+SELECT id, created_at, updated_at, name
+FROM users
+ORDER BY created_at;
+
 -- name: DeleteAllUsers :exec
 DELETE FROM users;
