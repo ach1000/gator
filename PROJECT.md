@@ -4,9 +4,9 @@
 This project demonstrates reading and writing a JSON config file stored in the user's home directory (`~/.gatorconfig.json`) using an internal Go package.
 
 ## Current Behavior
-- `main.go` reads config from disk through `internal/config.Read()`.
-- `main.go` sets `current_user_name` to `copilot` using `Config.SetUser()`.
-- `main.go` re-reads config and prints the resulting struct.
+- `main.go` reads config from disk into app state.
+- The CLI currently supports a `login` command that sets `current_user_name` in `~/.gatorconfig.json`.
+- Running `gator login <name>` updates the config and prints a confirmation message.
 
 ## Config Package Design (`internal/config`)
 - Exported:
@@ -41,6 +41,11 @@ Expected config JSON:
 - `Makefile` targets:
   - `run`: runs `go run .`
   - `clean`: removes local `gator` binary if present
+- Database schema is managed by goose.
+- Migration files live under `sql/schema`.
+- From `sql/schema`, use `goose postgres postgres://postgres:postgres@localhost:5432/gator up` to apply migrations.
+- From `sql/schema`, use `goose postgres postgres://postgres:postgres@localhost:5432/gator down` to roll back migrations.
+- `goose status` shows the current migration state of the database.
 
 ## Maintenance Rule
 Update this file whenever behavior, architecture, assumptions, or key commands change so future agents have accurate context.
