@@ -1,13 +1,22 @@
 # MEMORY.md
 
 ## Purpose
-This project demonstrates reading and writing a JSON config file stored in the user's home directory (`~/.gatorconfig.json`) using an internal Go package.
+This project is a Go CLI RSS reader backed by Postgres. It stores configuration in the user's home directory (`~/.gatorconfig.json`), manages schema and queries with goose and SQLC, and supports user, feed, and follow management commands.
 
 ## Current Behavior
 - `main.go` reads config from disk into app state.
-- The CLI currently supports a `login` command that sets `current_user_name` in `~/.gatorconfig.json`.
-- Running `gator login <name>` updates the config and prints a confirmation message.
-- The CLI also supports `register`, which creates a user in Postgres and sets that user as current.
+- The CLI supports these commands:
+  - `login`: sets `current_user_name` in `~/.gatorconfig.json`
+  - `register`: creates a user in Postgres and sets that user as current
+  - `reset`: deletes all users
+  - `users`: lists users and marks the current user
+  - `agg`: fetches and prints a hard-coded RSS feed
+  - `addfeed`: creates a feed for the current user and auto-follows it
+  - `feeds`: lists feeds with owner names
+  - `follow`: follows a feed by URL for the current user
+  - `unfollow`: unfollows a feed by URL for the current user
+  - `following`: lists feed names followed by the current user
+- Commands that require an authenticated user are wrapped with `middlewareLoggedIn`, which loads the current `database.User` once and passes it into the handler.
 
 ## Config Package Design (`internal/config`)
 - Exported:
@@ -20,6 +29,14 @@ This project demonstrates reading and writing a JSON config file stored in the u
   - `const configFileName = ".gatorconfig.json"`
   - `getConfigFilePath() (string, error)`
   - `write(cfg Config) error`
+
+## Command Design
+- `state` stores:
+  - `*database.Queries`
+  - `*config.Config`
+- `commands` is a string-to-handler registry with handlers of type `func(*state, command) error`.
+- Logged-in handlers use the higher-order wrapper `middlewareLoggedIn(handler func(s *state, cmd command, user database.User) error) func(*state, command) error`.
+- `follow` and `unfollow` both resolve feeds by URL before creating or deleting rows in `feed_follows`.
 
 ## File Format
 Expected config JSON:
@@ -52,6 +69,7 @@ Expected config JSON:
 - SQLC is configured from the repo root using `sqlc.yaml`.
 - SQLC reads schema files from `sql/schema` and queries from `sql/queries`.
 - Generated Go code is written to `internal/database`.
+- After editing SQL in `sql/queries`, regenerate generated Go code with `sqlc generate` or `make build`.
 - The application opens Postgres using the DB URL from `~/.gatorconfig.json` and stores `*database.Queries` in app state.
 
 ## Maintenance Rule
