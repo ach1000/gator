@@ -10,12 +10,14 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ach1000/gator/internal/config"
 	"github.com/ach1000/gator/internal/database"
 	"github.com/google/uuid"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 )
 
 type state struct {
@@ -110,6 +112,34 @@ func fetchFeed(ctx context.Context, feedURL string) (*RSSFeed, error) {
 	}
 
 	return &feed, nil
+}
+
+func parsePublishedAt(raw string) sql.NullTime {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return sql.NullTime{}
+	}
+
+	layouts := []string{
+		time.RFC1123Z,
+		time.RFC1123,
+		time.RFC822Z,
+		time.RFC822,
+		time.RFC850,
+		time.RFC3339,
+		time.RFC3339Nano,
+		"Mon, 2 Jan 2006 15:04:05 -0700",
+		"Mon, 02 Jan 2006 15:04:05 MST",
+	}
+
+	for _, layout := range layouts {
+		parsed, err := time.Parse(layout, raw)
+		if err == nil {
+			return sql.NullTime{Time: parsed.UTC(), Valid: true}
+		}
+	}
+
+	return sql.NullTime{}
 }
 
 func handlerLogin(s *state, cmd command) error {
@@ -222,7 +252,39 @@ func scrapeFeeds(s *state) error {
 	}
 
 	for _, item := range rssFeed.Channel.Items {
-		fmt.Println(item.Title)
+		itemURL := strings.TrimSpace(item.Link)
+		if itemURL == "" {
+			fmt.Printf("Skipping post with empty URL in feed %s\n", feed.Name)
+			continue
+		}
+
+		title := strings.TrimSpace(item.Title)
+		if title == "" {
+			title = "Untitled"
+		}
+
+		now := time.Now().UTC()
+		description := sql.NullString{String: strings.TrimSpace(item.Description), Valid: strings.TrimSpace(item.Description) != ""}
+		_, err := s.db.CreatePost(ctx, database.CreatePostParams{
+			ID:          uuid.New(),
+			CreatedAt:   now,
+			UpdatedAt:   now,
+			Title:       title,
+			Url:         itemURL,
+			Description: description,
+			PublishedAt: parsePublishedAt(item.PubDate),
+			FeedID:      feed.ID,
+		})
+		if err == nil {
+			continue
+		}
+
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			continue
+		}
+
+		fmt.Printf("Error saving post %q: %v\n", title, err)
 	}
 
 	return nil
@@ -371,6 +433,43 @@ func handlerFeeds(s *state, cmd command) error {
 	return nil
 }
 
+func handlerBrowse(s *state, cmd command, user database.User) error {
+	limit := 2
+	if len(cmd.args) > 1 {
+		return errors.New("browse takes at most one argument: limit")
+	}
+
+	if len(cmd.args) == 1 {
+		parsedLimit, err := strconv.Atoi(cmd.args[0])
+		if err != nil || parsedLimit <= 0 {
+			return errors.New("browse limit must be a positive integer")
+		}
+		limit = parsedLimit
+	}
+
+	posts, err := s.db.GetPostsForUser(context.Background(), database.GetPostsForUserParams{
+		UserID: user.ID,
+		Limit:  int32(limit),
+	})
+	if err != nil {
+		return err
+	}
+
+	for _, post := range posts {
+		fmt.Printf("Title: %s\n", post.Title)
+		fmt.Printf("URL: %s\n", post.Url)
+		if post.PublishedAt.Valid {
+			fmt.Printf("Published: %s\n", post.PublishedAt.Time.Format(time.RFC1123Z))
+		}
+		if post.Description.Valid {
+			fmt.Printf("Description: %s\n", post.Description.String)
+		}
+		fmt.Println()
+	}
+
+	return nil
+}
+
 func main() {
 	cfg, err := config.Read()
 	if err != nil {
@@ -406,6 +505,7 @@ func main() {
 	cmds.register("follow", middlewareLoggedIn(handlerFollow))
 	cmds.register("unfollow", middlewareLoggedIn(handlerUnfollow))
 	cmds.register("following", middlewareLoggedIn(handlerFollowing))
+	cmds.register("browse", middlewareLoggedIn(handlerBrowse))
 
 	cmd := command{
 		name: os.Args[1],
