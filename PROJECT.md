@@ -10,12 +10,13 @@ This project is a Go CLI RSS reader backed by Postgres. It stores configuration 
   - `register`: creates a user in Postgres and sets that user as current
   - `reset`: deletes all users
   - `users`: lists users and marks the current user
-  - `agg <time_between_reqs>`: runs a never-ending aggregation loop; fetches the next scheduled feed, prints item titles, and repeats on a ticker interval (e.g. `1s`, `1m`, `1h`)
+  - `agg <time_between_reqs>`: runs a never-ending aggregation loop; fetches the next scheduled feed and stores feed items as posts in the DB on a ticker interval (e.g. `1s`, `1m`, `1h`)
   - `addfeed`: creates a feed for the current user and auto-follows it
   - `feeds`: lists feeds with owner names
   - `follow`: follows a feed by URL for the current user
   - `unfollow`: unfollows a feed by URL for the current user
   - `following`: lists feed names followed by the current user
+  - `browse [limit]`: shows recent posts from feeds followed by the current user; default limit is `2`
 - Commands that require an authenticated user are wrapped with `middlewareLoggedIn`, which loads the current `database.User` once and passes it into the handler.
 
 ## Config Package Design (`internal/config`)
@@ -41,8 +42,11 @@ This project is a Go CLI RSS reader backed by Postgres. It stores configuration 
   - `handlerAgg` requires exactly one duration argument and parses it with `time.ParseDuration`
   - It prints `Collecting feeds every <duration>` and starts a `time.Ticker`
   - It runs immediately, then once per tick via a `for ; ; <-ticker.C` loop
-  - `scrapeFeeds` selects one feed to fetch (`GetNextFeedToFetch`), marks it fetched (`MarkFeedFetched`), fetches RSS with `fetchFeed`, and prints each item title
+  - `scrapeFeeds` selects one feed to fetch (`GetNextFeedToFetch`), marks it fetched (`MarkFeedFetched`), fetches RSS with `fetchFeed`, and inserts items into `posts`
+  - Duplicate post URLs are ignored by checking Postgres error code `23505` (unique violation)
+  - Published timestamps are parsed with multiple layouts and stored as `sql.NullTime` (invalid/unparseable dates are left null)
   - Scrape errors are logged and the loop continues until process termination (Ctrl+C)
+  - `browse` is a logged-in command that accepts an optional positive integer limit and queries posts via `GetPostsForUser`
 
 ## File Format
 Expected config JSON:
@@ -81,6 +85,11 @@ Expected config JSON:
   - Query `MarkFeedFetched` sets `last_fetched_at = NOW()` and `updated_at = NOW()` for a feed ID.
   - Query `GetNextFeedToFetch` returns one feed ordered by `last_fetched_at ASC NULLS FIRST`.
   - If code references `last_fetched_at` before migration is applied, Postgres returns `column "last_fetched_at" does not exist (42703)`.
+- Posts schema/query changes:
+  - Migration `sql/schema/005_posts.sql` adds the `posts` table (`url` unique, `feed_id` FK to `feeds`).
+  - Query `CreatePost` inserts one post row.
+  - Query `GetPostsForUser` returns posts for feeds a user follows, ordered by newest first, with configurable `LIMIT`.
+  - Apply goose up migrations before running `agg`/`browse` against new schema.
 - The application opens Postgres using the DB URL from `~/.gatorconfig.json` and stores `*database.Queries` in app state.
 
 ## Maintenance Rule
