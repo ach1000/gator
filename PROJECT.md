@@ -94,3 +94,15 @@ Expected config JSON:
 
 ## Maintenance Rule
 Update this file whenever behavior, architecture, assumptions, or key commands change so future agents have accurate context.
+
+## Extending the Project
+If you'd like to keep building on this project, potential next steps include:
+
+- Add sorting and filtering options to the `browse` command.
+- Add pagination to the `browse` command.
+- Add concurrency to the `agg` command so it can fetch more frequently.
+- Add a `search` command that allows fuzzy searching of posts.
+- Add bookmarking or liking posts.
+- Add a TUI that allows selecting a post in the terminal and viewing it in a more readable format (in-terminal or in browser).
+- Add an HTTP API (with authentication/authorization) so users can interact with the service remotely.
+- Write a service manager that keeps `agg` running in the background and restarts it if it crashes.
